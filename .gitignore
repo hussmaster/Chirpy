@@ -1,0 +1,3 @@
+.env
+goose_migrations.txt
+test.http

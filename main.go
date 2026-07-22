@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/hussmaster/Chirpy/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -20,6 +22,15 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	platform       string
+}
+
+// User struct for adding to database
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 // Displays site status code
@@ -46,7 +57,18 @@ func (cfg *apiConfig) getFileServerHits(w http.ResponseWriter, r *http.Request) 
 
 // Resets hit counter
 func (cfg *apiConfig) resetFileServerHits(w http.ResponseWriter, r *http.Request) {
-	cfg.fileserverHits.Store(0)
+	if cfg.platform != "dev" {
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type: text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden) // Set 403
+		w.Write([]byte("403 Forbidden"))
+	} else {
+		cfg.fileserverHits.Store(0)
+		_, err := cfg.db.DeleteUsers(r.Context())
+		if err != nil {
+			log.Fatalf("error cleaing users table: %v\n", err)
+		}
+	}
+
 }
 
 // Function that responds with JSON
@@ -68,6 +90,7 @@ func respondWithError(w http.ResponseWriter, code int, msg string) error {
 }
 
 // Make sure Chirp is no more than 140 characters and has valid json
+/*
 func validateChirp(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	type requestBody struct {
@@ -90,6 +113,66 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, 200, responseBody{CleanedBody: cleaned})
 	}
 }
+*/
+
+// Posts chirp into database
+func (cfg *apiConfig) postChirp(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	type requestBody struct {
+		Body   string    `json:"body"`
+		UserId uuid.UUID `json:"user_id"`
+	}
+	type responseBody struct {
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserId    uuid.UUID `json:"user_id"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	//Create database postchirp parameter struct to decode into
+	params := requestBody{}
+	chirpParams := database.PostChirpParams{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		log.Printf("something went wrong: %v\n", err)
+		return
+	}
+	if len(params.Body) > 140 {
+		respondWithError(w, 400, "Chirp is too long")
+		log.Print("Chirp is too long")
+		return
+	} else if len(params.Body) < 1 {
+		respondWithError(w, 400, "Chirp is too short")
+		log.Print("Chirp is too short")
+		return
+	} else {
+		//Clean body text for bad words
+		cleaned := cleanText(params.Body)
+		params.Body = cleaned
+		// Post the chirp into the database
+		chirpParams.Body = cleaned
+		chirpParams.UserID = params.UserId
+		userPost, err := cfg.db.PostChirp(r.Context(), chirpParams)
+		if err != nil {
+			respondWithError(w, 500, "error posting chirp")
+			log.Printf("error posting chrip: %v\n", err)
+			return
+		}
+		//Create return json struct
+		returnBody := responseBody{}
+		returnBody.Id = userPost.ID
+		returnBody.CreatedAt = userPost.CreatedAt
+		returnBody.UpdatedAt = userPost.UpdatedAt
+		returnBody.Body = userPost.Body
+		returnBody.UserId = userPost.UserID
+
+		respondWithJSON(w, 201, returnBody)
+	}
+
+}
 
 // Function to clean text for profane words
 func cleanText(body string) string {
@@ -108,9 +191,47 @@ func cleanText(body string) string {
 	return replacementText // change
 }
 
+// Function to add users to database
+func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	type requestBody struct {
+		Email string `json:"email"`
+	}
+	type responseBody struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := requestBody{}
+	// Decode into the params struct
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, "Something went wrong")
+	}
+	//Create the user, passing in the HTTP context and the email
+	returnBody := responseBody{}
+	user, err := cfg.db.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		log.Fatalf("error creating user: %v\n", err)
+	}
+	//Populate struct for returning
+	returnBody.ID = user.ID
+	returnBody.CreatedAt = user.CreatedAt
+	returnBody.UpdatedAt = user.UpdatedAt
+	returnBody.Email = user.Email
+	err = respondWithJSON(w, 201, returnBody)
+	if err != nil {
+		respondWithError(w, 400, "Something went wrong")
+	}
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 	if dbURL == "" {
 		log.Fatalf("DBURL is an empty string \n")
 	}
@@ -130,7 +251,8 @@ func main() {
 	}
 	apiCfg := apiConfig{
 		// assign db connection to sqlc connection
-		db: dbQueries,
+		db:       dbQueries,
+		platform: platform,
 	}
 	//index.html is in the app folder, strip out app prefix before sending to fileserver
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("app")))))
@@ -138,7 +260,9 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthCheck)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileServerHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetFileServerHits)
-	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	//mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	mux.HandleFunc("POST /api/chirps", apiCfg.postChirp)
+	mux.HandleFunc("POST /api/users", apiCfg.addUser)
 	//Serve website
 	http.ListenAndServe(server.Addr, server.Handler)
 

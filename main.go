@@ -228,6 +228,69 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Function to retrieve all chirps from database
+func (cfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	// No need to ingest json here
+	type returnBody struct {
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserId    uuid.UUID `json:"user_id"`
+	}
+	respBody := []returnBody{}
+	//Get db rows in var
+	allChirps, err := cfg.db.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithError(w, 500, "error retrieving chirps")
+		log.Printf("error retrieving chirps: %v\n", err)
+		return
+	}
+	// Loop through dbRows, create temp struct and append to main array respBody struct
+	for _, dbRow := range allChirps {
+		tempBody := returnBody{
+			Id:        dbRow.ID,
+			CreatedAt: dbRow.CreatedAt,
+			UpdatedAt: dbRow.UpdatedAt,
+			Body:      dbRow.Body,
+			UserId:    dbRow.UserID,
+		}
+		respBody = append(respBody, tempBody)
+	}
+	respondWithJSON(w, 200, respBody)
+}
+
+func (cfg *apiConfig) getOneChirp(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	type returnBody struct {
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserId    uuid.UUID `json:"user_id"`
+	}
+	respBody := returnBody{}
+	chirpUUID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 500, "something went wrong")
+		log.Printf("unable to parse request string into uuid type: %v\n", err)
+		return
+	}
+	oneChirp, err := cfg.db.GetOneChirp(r.Context(), chirpUUID)
+	if err != nil {
+		respondWithError(w, 404, "something went wrong")
+		log.Printf("db query for single chirp failed: %v\n", err)
+		return
+	}
+	respBody.Id = oneChirp.ID
+	respBody.CreatedAt = oneChirp.CreatedAt
+	respBody.UpdatedAt = oneChirp.UpdatedAt
+	respBody.Body = oneChirp.Body
+	respBody.UserId = oneChirp.UserID
+	respondWithJSON(w, 200, respBody)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -263,6 +326,8 @@ func main() {
 	//mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("POST /api/chirps", apiCfg.postChirp)
 	mux.HandleFunc("POST /api/users", apiCfg.addUser)
+	mux.HandleFunc("GET /api/chirps", apiCfg.getAllChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getOneChirp)
 	//Serve website
 	http.ListenAndServe(server.Addr, server.Handler)
 

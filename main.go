@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hussmaster/Chirpy/internal/auth"
 	"github.com/hussmaster/Chirpy/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -88,32 +89,6 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error
 func respondWithError(w http.ResponseWriter, code int, msg string) error {
 	return respondWithJSON(w, code, map[string]string{"error": msg})
 }
-
-// Make sure Chirp is no more than 140 characters and has valid json
-/*
-func validateChirp(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	type requestBody struct {
-		Body string `json:"body"`
-	}
-	type responseBody struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-	decoder := json.NewDecoder(r.Body)
-	params := requestBody{}
-	//Change to output cleaned body text
-	err := decoder.Decode(&params)
-	cleaned := cleanText(params.Body)
-	if err != nil {
-		respondWithError(w, 400, "Something went wrong")
-	}
-	if len(params.Body) > 140 {
-		respondWithError(w, 400, "Chirp is too long")
-	} else {
-		respondWithJSON(w, 200, responseBody{CleanedBody: cleaned})
-	}
-}
-*/
 
 // Posts chirp into database
 func (cfg *apiConfig) postChirp(w http.ResponseWriter, r *http.Request) {
@@ -195,7 +170,8 @@ func cleanText(body string) string {
 func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	type requestBody struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	type responseBody struct {
 		ID        uuid.UUID `json:"id"`
@@ -210,12 +186,27 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
 	err := decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, 400, "Something went wrong")
+		return
 	}
-	//Create the user, passing in the HTTP context and the email
+	// Create the user, passing in the HTTP context and the email
 	returnBody := responseBody{}
-	user, err := cfg.db.CreateUser(r.Context(), params.Email)
+	// Hash password from response/params struct
+	hashedPass, err := auth.HashPassword(params.Password)
 	if err != nil {
-		log.Fatalf("error creating user: %v\n", err)
+		respondWithError(w, 400, "Something went wrong")
+		log.Printf("error hashing password: %v\n", err)
+		return
+	}
+	// Create database user params struct to pass into CreateUser
+	userParams := database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: hashedPass,
+	}
+	user, err := cfg.db.CreateUser(r.Context(), userParams)
+	if err != nil {
+		respondWithError(w, 400, "Something went wrong")
+		log.Printf("error creating user: %v\n", err)
+		return
 	}
 	//Populate struct for returning
 	returnBody.ID = user.ID
@@ -223,6 +214,56 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
 	returnBody.UpdatedAt = user.UpdatedAt
 	returnBody.Email = user.Email
 	err = respondWithJSON(w, 201, returnBody)
+	if err != nil {
+		respondWithError(w, 400, "Something went wrong")
+	}
+}
+
+// Function to login
+func (cfg *apiConfig) userLogin(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	type requestBody struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	type responseBody struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := requestBody{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, "Something went wrong")
+		log.Printf("error decoding params: %v\n", err)
+		return
+	}
+	user, err := cfg.db.UserLookup(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, 401, "incorrect email or password")
+		log.Printf("error on user lookup: %v\n", err)
+		return
+	}
+	userPasswordCheck, err := auth.CheckPasswordHash(params.Password, user.HashedPassword)
+	if err != nil {
+		respondWithError(w, 401, "incorrect email or password")
+		log.Printf("error on hashing check: %v\n", err)
+		return
+	}
+	if userPasswordCheck != true {
+		respondWithError(w, 401, "incorrect email or password")
+		log.Print("password hashes did not match")
+		return
+	}
+	returnBody := responseBody{}
+	returnBody.ID = user.ID
+	returnBody.CreatedAt = user.CreatedAt
+	returnBody.UpdatedAt = user.UpdatedAt
+	returnBody.Email = user.Email
+	err = respondWithJSON(w, 200, returnBody)
 	if err != nil {
 		respondWithError(w, 400, "Something went wrong")
 	}
@@ -323,11 +364,11 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthCheck)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.getFileServerHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetFileServerHits)
-	//mux.HandleFunc("POST /api/validate_chirp", validateChirp)
 	mux.HandleFunc("POST /api/chirps", apiCfg.postChirp)
 	mux.HandleFunc("POST /api/users", apiCfg.addUser)
 	mux.HandleFunc("GET /api/chirps", apiCfg.getAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getOneChirp)
+	mux.HandleFunc("POST /api/login", apiCfg.userLogin)
 	//Serve website
 	http.ListenAndServe(server.Addr, server.Handler)
 

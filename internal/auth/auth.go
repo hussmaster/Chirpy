@@ -1,15 +1,15 @@
 package auth
 
 import (
-	"log"
+	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/argon2id"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
-
-var hmacSecret []byte
 
 // Hashes plain text string to hashed value
 func HashPassword(password string) (string, error) {
@@ -28,8 +28,6 @@ func CheckPasswordHash(password, hash string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-
-	log.Printf("Match: %v\n", match)
 	return match, nil
 }
 
@@ -45,7 +43,6 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 	if err != nil {
 		return "", err
 	}
-
 	return tokenString, nil
 }
 
@@ -68,4 +65,18 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return parsedUUID, nil
+}
+
+// Gets TOKENSTRING from the auth header
+// Auth header should look like
+// Bearer <TOKEN>
+func GetBearerToken(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("Authorization header is empty")
+	}
+	//fmt.Printf("header: %v\n", authHeader)
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	return tokenString, nil
+
 }

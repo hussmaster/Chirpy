@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -100,4 +101,17 @@ func TestExpiredJWT(t *testing.T) {
 		t.Fatalf("unexpected error: %v\n", err)
 	}
 
+}
+
+func TestBearerToken(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer bingbong")
+
+	result, err := GetBearerToken(headers)
+	if err != nil {
+		t.Fatalf("unexepected error:%v \n", err)
+	}
+	if result != "bingbong" {
+		t.Fatalf("expected json, got %s", result)
+	}
 }

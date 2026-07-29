@@ -127,6 +127,8 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", apiCfg.getAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getOneChirp)
 	mux.HandleFunc("POST /api/login", apiCfg.userLogin)
+	mux.HandleFunc("POST /api/refresh", apiCfg.refreshAccessToken)
+	mux.HandleFunc("POST /api/revoke", apiCfg.revokeRefreshToken)
 	//Serve website
 	http.ListenAndServe(server.Addr, server.Handler)
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -68,33 +69,27 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) userLogin(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	type requestBody struct {
-		Email            string        `json:"email"`
-		Password         string        `json:"password"`
-		ExpiresInSeconds time.Duration `json:"expires_in_seconds"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	type responseBody struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-		Token     string    `json:"token"`
+		ID           uuid.UUID `json:"id"`
+		CreatedAt    time.Time `json:"created_at"`
+		UpdatedAt    time.Time `json:"updated_at"`
+		Email        string    `json:"email"`
+		Token        string    `json:"token"`
+		RefreshToken string    `json:"refresh_token"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
-	// Set default expiry to 1 hour
-	params := requestBody{
-		ExpiresInSeconds: time.Duration(3600) * time.Second,
-	}
+	params := requestBody{}
 	err := decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, 400, "Something went wrong")
 		log.Printf("error decoding params: %v\n", err)
 		return
 	}
-	// Prevent tokens expiry longer than 1 hour
-	if params.ExpiresInSeconds > 3600 {
-		params.ExpiresInSeconds = time.Duration(3600) * time.Second
-	}
+
 	user, err := cfg.db.UserLookup(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, 401, "incorrect email or password")
@@ -114,20 +109,103 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Create JWT and pass it along on the login process
 	// make sure to pass in server secret environment variable
-	userJWT, err := auth.MakeJWT(user.ID, cfg.serversecret, time.Duration(params.ExpiresInSeconds))
+	// expire tokens after 1 hour
+	userJWT, err := auth.MakeJWT(user.ID, cfg.serversecret, time.Duration(3600)*time.Second)
 	if err != nil {
 		respondWithError(w, 400, "something went wrong")
 		log.Printf("error making the jwt: %v\n", err)
 		return
 	}
+	// Generate refresh token
+	userRefreshToken := auth.MakeRefreshToken()
+	userRefreshParams := database.RefreshTokenParams{
+		Token:  userRefreshToken,
+		UserID: user.ID,
+	}
+	// Save refresh token into refresh_tokens database
+	cfg.db.RefreshToken(r.Context(), userRefreshParams)
 	returnBody := responseBody{}
 	returnBody.ID = user.ID
 	returnBody.CreatedAt = user.CreatedAt
 	returnBody.UpdatedAt = user.UpdatedAt
 	returnBody.Email = user.Email
 	returnBody.Token = userJWT
+	returnBody.RefreshToken = userRefreshToken
 	err = respondWithJSON(w, 200, returnBody)
 	if err != nil {
 		respondWithError(w, 400, "Something went wrong")
 	}
+}
+
+func (cfg *apiConfig) refreshAccessToken(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	refreshHeader, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 400, "no refresh token in header")
+		log.Printf("error getting refresh token from header: %v\n", err)
+		return
+	}
+
+	user, err := cfg.db.GetUserFromRefreshToken(r.Context(), refreshHeader)
+	if err != nil {
+		respondWithError(w, 404, "something went wrong")
+		log.Printf("db query for userID by refresh token failed: %v\n", err)
+		return
+	}
+	// Make sure the refresh token isn't revoked
+	if user.RevokedAt.Valid {
+		respondWithError(w, 401, "refresh token is revoked")
+		log.Printf("refresh token is revoked: %v\n", user.RevokedAt.Time)
+		return
+	}
+	// Make sure the refresh token isn't expired
+	isExpired := time.Now().After(user.ExpiresAt)
+	if isExpired {
+		respondWithError(w, 401, "refresh token is expired")
+		log.Printf("refresh token is expired: %v\n", err)
+		return
+	}
+	newAccessTok, err := auth.MakeJWT(user.UserID, cfg.serversecret, time.Duration(3600)*time.Second)
+	if err != nil {
+		respondWithError(w, 500, "failed to generate JWT")
+		log.Printf("failed to make the jwt: %v\n", err)
+		return
+	}
+	// Return new access token
+	type responseBody struct {
+		Token string `json:"token"`
+	}
+	returnBody := responseBody{}
+	returnBody.Token = newAccessTok
+	// Send back new access token
+	respondWithJSON(w, 200, returnBody)
+}
+
+// Revoke refresh token
+func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	refreshHeader, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 400, "no refresh token in header")
+		log.Printf("error getting refresh token: %v\n", err)
+		return
+	}
+
+	// Wrap time.Now in sql NullTime
+	revokeParams := database.RevokeRefreshTokenParams{
+		UpdatedAt: time.Now(),
+		RevokedAt: sql.NullTime{
+			Time:  time.Now(),
+			Valid: true,
+		},
+		Token: refreshHeader,
+	}
+	err = cfg.db.RevokeRefreshToken(r.Context(), revokeParams)
+	if err != nil {
+		respondWithError(w, 500, "failed to revoke refresh token")
+		log.Printf("failed to revoke refresh token: %v\n", err)
+		return
+	}
+	// Send back only status code 204
+	w.WriteHeader(204)
 }

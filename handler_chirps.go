@@ -34,7 +34,7 @@ func (cfg *apiConfig) postChirp(w http.ResponseWriter, r *http.Request) {
 	}
 	validatedUUID, err := auth.ValidateJWT(authHeader, cfg.serversecret)
 	if err != nil {
-		respondWithError(w, 400, "unauthorized token")
+		respondWithError(w, 401, "unauthorized token")
 		log.Printf("JWT was not validated: %v\n", err)
 		return
 	}

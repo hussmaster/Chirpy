@@ -213,6 +213,7 @@ func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request)
 // Function to allow updating of email of password
 func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+
 	type requestBody struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -223,12 +224,14 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt time.Time `json:"updated_at"`
 		Email     string    `json:"email"`
 	}
+	// Extract access token from header
 	accessToken, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		respondWithError(w, 401, "no access token")
 		log.Printf("no access token in header: %v\n", err)
 		return
 	}
+	// Get UUID from access token
 	validatedUUID, err := auth.ValidateJWT(accessToken, cfg.serversecret)
 	if err != nil {
 		respondWithError(w, 401, "unauthorized token")
@@ -243,14 +246,14 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 		log.Printf("error decoding params: %v\n", err)
 		return
 	}
-
+	// Lookup the user by validated UUID
 	userDB, err := cfg.db.UserLookupByID(r.Context(), validatedUUID)
 	if err != nil {
 		respondWithError(w, 404, "user not found")
 		log.Printf("user ID not in database: %v\n", err)
 		return
 	}
-
+	// Hash the new password from the user
 	newHashedPass, err := auth.HashPassword(params.Password)
 	if err != nil {
 		respondWithError(w, 500, "unable to hash password")
@@ -264,7 +267,7 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:      time.Now(),
 		ID:             validatedUUID,
 	}
-
+	// Update the user with the above values
 	err = cfg.db.UpdateUser(r.Context(), userupdateParams)
 	if err != nil {
 		respondWithError(w, 500, "error updating user")

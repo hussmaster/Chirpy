@@ -163,3 +163,54 @@ func (cfg *apiConfig) getOneChirp(w http.ResponseWriter, r *http.Request) {
 	respBody.UserId = oneChirp.UserID
 	respondWithJSON(w, 200, respBody)
 }
+
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	// Extract access token from header
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "no access token")
+		log.Printf("no access token in header: %v\n", err)
+		return
+	}
+
+	// Get UUID from access token
+	validatedUUID, err := auth.ValidateJWT(accessToken, cfg.serversecret)
+	if err != nil {
+		respondWithError(w, 401, "unauthorized token")
+		log.Printf("JWT was not validated: %v\n", err)
+		return
+	}
+
+	// Parse chirp ID into uuid from the URL
+	chirpUUID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 500, "something went wrong")
+		log.Printf("unable to parse chirpID string into uuid: %v\n", err)
+		return
+	}
+	// Check if chirp exists in the database
+	validChirp, err := cfg.db.GetOneChirp(r.Context(), chirpUUID)
+	if err != nil {
+		respondWithError(w, 404, "chirp is not found")
+		log.Printf("chirp not found in the db: %v\n", err)
+		return
+	}
+
+	if validChirp.UserID != validatedUUID {
+		respondWithError(w, 403, "unauthorized")
+		log.Printf("unauthorized chirp deletion attempt: %v\n", err)
+		return
+	}
+
+	// Delete chirp
+	err = cfg.db.DeleteChirp(r.Context(), chirpUUID)
+	if err != nil {
+		respondWithError(w, 403, "unauthorized")
+		log.Printf("unauthorzied chirp deletion attempt: %v\n", err)
+		return
+	}
+	// Successful delete
+	w.WriteHeader(204)
+
+}

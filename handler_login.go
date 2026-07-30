@@ -20,10 +20,11 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	type responseBody struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
+		ID          uuid.UUID `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -59,6 +60,7 @@ func (cfg *apiConfig) addUser(w http.ResponseWriter, r *http.Request) {
 	returnBody.CreatedAt = user.CreatedAt
 	returnBody.UpdatedAt = user.UpdatedAt
 	returnBody.Email = user.Email
+	returnBody.IsChirpyRed = user.IsChirpyRed.Bool
 	err = respondWithJSON(w, 201, returnBody)
 	if err != nil {
 		respondWithError(w, 400, "Something went wrong")
@@ -79,6 +81,7 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, r *http.Request) {
 		Email        string    `json:"email"`
 		Token        string    `json:"token"`
 		RefreshToken string    `json:"refresh_token"`
+		IsChirpyRed  bool      `json:"is_chirpy_red"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -131,6 +134,7 @@ func (cfg *apiConfig) userLogin(w http.ResponseWriter, r *http.Request) {
 	returnBody.Email = user.Email
 	returnBody.Token = userJWT
 	returnBody.RefreshToken = userRefreshToken
+	returnBody.IsChirpyRed = user.IsChirpyRed.Bool
 	err = respondWithJSON(w, 200, returnBody)
 	if err != nil {
 		respondWithError(w, 400, "Something went wrong")
@@ -219,10 +223,11 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	type responseBody struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
+		ID          uuid.UUID `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 	// Extract access token from header
 	accessToken, err := auth.GetBearerToken(r.Header)
@@ -276,10 +281,11 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	returnBody := responseBody{
-		ID:        validatedUUID,
-		CreatedAt: userDB.CreatedAt,
-		UpdatedAt: userupdateParams.UpdatedAt,
-		Email:     params.Email,
+		ID:          validatedUUID,
+		CreatedAt:   userDB.CreatedAt,
+		UpdatedAt:   userupdateParams.UpdatedAt,
+		Email:       params.Email,
+		IsChirpyRed: userDB.IsChirpyRed.Bool,
 	}
 
 	err = respondWithJSON(w, 200, returnBody)

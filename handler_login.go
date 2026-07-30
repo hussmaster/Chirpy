@@ -209,3 +209,80 @@ func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request)
 	// Send back only status code 204
 	w.WriteHeader(204)
 }
+
+// Function to allow updating of email of password
+func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	type requestBody struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	type responseBody struct {
+		ID        uuid.UUID `jsond:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+	accessToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "no access token")
+		log.Printf("no access token in header: %v\n", err)
+		return
+	}
+	validatedUUID, err := auth.ValidateJWT(accessToken, cfg.serversecret)
+	if err != nil {
+		respondWithError(w, 401, "unauthorized token")
+		log.Printf("JWT was not validated: %v\n", err)
+		return
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := requestBody{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 500, "something went wrong")
+		log.Printf("error decoding params: %v\n", err)
+		return
+	}
+
+	userDB, err := cfg.db.UserLookupByID(r.Context(), validatedUUID)
+	if err != nil {
+		respondWithError(w, 404, "user not found")
+		log.Printf("user ID not in database: %v\n", err)
+		return
+	}
+
+	newHashedPass, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, 500, "unable to hash password")
+		log.Printf("unable to hash password: %v\n", err)
+		return
+	}
+
+	userupdateParams := database.UpdateUserParams{
+		Email:          params.Email,
+		HashedPassword: newHashedPass,
+		UpdatedAt:      time.Now(),
+		ID:             validatedUUID,
+	}
+
+	err = cfg.db.UpdateUser(r.Context(), userupdateParams)
+	if err != nil {
+		respondWithError(w, 500, "error updating user")
+		log.Printf("error updating user in database: %v\n", err)
+		return
+	}
+
+	returnBody := responseBody{
+		ID:        validatedUUID,
+		CreatedAt: userDB.CreatedAt,
+		UpdatedAt: userupdateParams.UpdatedAt,
+		Email:     params.Email,
+	}
+
+	err = respondWithJSON(w, 200, returnBody)
+	if err != nil {
+		respondWithError(w, 401, "something went wrong")
+		log.Printf("error sending returnbody: %v\n", err)
+	}
+
+}

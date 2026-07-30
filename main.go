@@ -129,6 +129,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", apiCfg.userLogin)
 	mux.HandleFunc("POST /api/refresh", apiCfg.refreshAccessToken)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeRefreshToken)
+	mux.HandleFunc("PUT /api/users", apiCfg.updateUser)
 	//Serve website
 	http.ListenAndServe(server.Addr, server.Handler)
 

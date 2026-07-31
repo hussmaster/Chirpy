@@ -42,6 +42,7 @@ Will return the following
     "email": "email address",
     "is_chirpy_red": "either true or false, default is false"
 }
+```
 
 ### Login
 

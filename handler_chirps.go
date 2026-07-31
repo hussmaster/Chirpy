@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -113,13 +114,50 @@ func (cfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
 		UserId    uuid.UUID `json:"user_id"`
 	}
 	respBody := []returnBody{}
-	//Get db rows in var
-	allChirps, err := cfg.db.GetAllChirps(r.Context())
-	if err != nil {
-		respondWithError(w, 500, "error retrieving chirps")
-		log.Printf("error retrieving chirps: %v\n", err)
-		return
+	// Look for optional author_id parameter in GET request
+	authorID := r.URL.Query().Get("author_id")
+	// Look for optional sort parameter
+	sorting := r.URL.Query().Get("sort")
+
+	// Declare variables outside of if/else block
+	var allChirps []database.Chirp
+	var err error
+	log.Printf("header: %v\n", r.URL)
+	if authorID != "" {
+		// Parse authorID string to uuid
+		authorUUID, err := uuid.Parse(authorID)
+		if err != nil {
+			respondWithError(w, 500, "error parsing author into uuid")
+			log.Printf("error parsing uuid from author id: %v\n", err)
+			return
+		}
+		allChirps, err = cfg.db.GetAllChirpsByID(r.Context(), authorUUID)
+		if err != nil {
+			respondWithError(w, 500, "error retrieving chirps")
+			log.Printf("error retrieving chrips for %v: %v\n", authorID, err)
+			return
+		}
+
+	} else {
+		//Get db rows in var
+		allChirps, err = cfg.db.GetAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, 500, "error retrieving chirps")
+			log.Printf("error retrieving chirps: %v\n", err)
+			return
+		}
 	}
+	// Sort the chirps
+	// Default is ASC
+	switch sorting {
+	case "desc":
+		sort.Slice(allChirps, func(i, j int) bool { return allChirps[j].CreatedAt.Before(allChirps[i].CreatedAt) })
+	case "asc":
+		sort.Slice(allChirps, func(i, j int) bool { return allChirps[i].CreatedAt.Before(allChirps[j].CreatedAt) })
+	case "":
+		sort.Slice(allChirps, func(i, j int) bool { return allChirps[i].CreatedAt.Before(allChirps[j].CreatedAt) })
+	}
+
 	// Loop through dbRows, create temp struct and append to main array respBody struct
 	for _, dbRow := range allChirps {
 		tempBody := returnBody{

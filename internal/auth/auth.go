@@ -77,7 +77,7 @@ func GetBearerToken(headers http.Header) (string, error) {
 	if authHeader == "" {
 		return "", fmt.Errorf("Authorization header is empty")
 	}
-	//fmt.Printf("header: %v\n", authHeader)
+	// Strips out Bearer from Authorization header
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 	return tokenString, nil
 
@@ -91,4 +91,14 @@ func MakeRefreshToken() string {
 	// Conver and encode to Hex string
 	encodedRefresh := hex.EncodeToString(refreshTok)
 	return encodedRefresh
+}
+
+// Function to get API KEY from header with format being Authorization: ApiKey <Key>
+func GetAPIKey(headers http.Header) (string, error) {
+	apiHeader := headers.Get("Authorization")
+	if apiHeader == "" {
+		return "", fmt.Errorf("Authorization header is empty")
+	}
+	apiString := strings.TrimPrefix(apiHeader, "ApiKey ")
+	return apiString, nil
 }

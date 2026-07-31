@@ -4,13 +4,17 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/google/uuid"
+	"github.com/hussmaster/Chirpy/internal/auth"
 )
 
+// Function to enable Chirpy red on an account
 func (cfg *apiConfig) chirpyredEnable(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-
+	// Get POLKA API Key
+	polkaKey := os.Getenv("POLKA_KEY")
 	// Webhook body
 	type requestBody struct {
 		Event string `json:"event"`
@@ -18,10 +22,20 @@ func (cfg *apiConfig) chirpyredEnable(w http.ResponseWriter, r *http.Request) {
 			UserID uuid.UUID `json:"user_id"`
 		} `json:"data"`
 	}
-
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "no api key")
+		log.Printf("no api key in header: %v\n", err)
+		return
+	}
+	if polkaKey != apiKey {
+		respondWithError(w, 401, "invalid api key")
+		log.Printf("api key and polka api key do not match: %v\n", err)
+		return
+	}
 	decoder := json.NewDecoder(r.Body)
 	params := requestBody{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, 400, "something went wrong")
 		log.Printf("unable to decode params: %v\n", err)

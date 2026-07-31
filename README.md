@@ -45,5 +45,5 @@ go build -o chirpy
 ./chirpy
 ```
 
-API information can be found at [!docs](/docs/DOCS.md)
+API information can be found at [docs](/docs/DOCS.md)
 

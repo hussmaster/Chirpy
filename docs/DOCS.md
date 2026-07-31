@@ -74,6 +74,7 @@ Returns
 {
     "token": "new access token"
 }
+```
 
 ### Revoke Refresh Token
 
@@ -107,6 +108,7 @@ Responds with
     "email": "new email",
     "is_chirpy_red": "true or false"
 }
+```
 
 ### Post Chirp
 

@@ -165,6 +165,7 @@ Returns only one chirp by ID. Requires chirp ID in http Path value
     "body": "body of chirp",
     "user_id": "user id of chirp postee"
 }
+```
 
 ### Delete Chirp
 
